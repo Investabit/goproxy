@@ -57,11 +57,11 @@ func (proxy *ProxyHttpServer) dial(network, addr string) (c net.Conn, err error)
 	return net.Dial(network, addr)
 }
 
-func (proxy *ProxyHttpServer) connectDial(network, addr string) (c net.Conn, err error) {
+func (proxy *ProxyHttpServer) connectDial(network, addr string, r *http.Request) (c net.Conn, err error) {
 	if proxy.ConnectDial == nil {
 		return proxy.dial(network, addr)
 	}
-	return proxy.ConnectDial(network, addr)
+	return proxy.ConnectDial(network, addr, r)
 }
 
 func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request) {
@@ -94,7 +94,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 		if !hasPort.MatchString(host) {
 			host += ":80"
 		}
-		targetSiteCon, err := proxy.connectDial("tcp", host)
+		targetSiteCon, err := proxy.connectDial("tcp", host, r)
 		if err != nil {
 			httpError(proxyClient, ctx, err)
 			return
@@ -127,7 +127,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 	case ConnectHTTPMitm:
 		proxyClient.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
 		ctx.Logf("Assuming CONNECT is plain HTTP tunneling, mitm proxying it")
-		targetSiteCon, err := proxy.connectDial("tcp", host)
+		targetSiteCon, err := proxy.connectDial("tcp", host, r)
 		if err != nil {
 			ctx.Warnf("Error dialing to %s: %s", host, err.Error())
 			return
@@ -302,7 +302,7 @@ func copyAndClose(ctx *ProxyCtx, dst, src *net.TCPConn) {
 	src.CloseRead()
 }
 
-func dialerFromEnv(proxy *ProxyHttpServer) func(network, addr string) (net.Conn, error) {
+func dialerFromEnv(proxy *ProxyHttpServer) func(network, addr string, r *http.Request) (net.Conn, error) {
 	https_proxy := os.Getenv("HTTPS_PROXY")
 	if https_proxy == "" {
 		https_proxy = os.Getenv("https_proxy")
@@ -313,11 +313,11 @@ func dialerFromEnv(proxy *ProxyHttpServer) func(network, addr string) (net.Conn,
 	return proxy.NewConnectDialToProxy(https_proxy)
 }
 
-func (proxy *ProxyHttpServer) NewConnectDialToProxy(https_proxy string) func(network, addr string) (net.Conn, error) {
+func (proxy *ProxyHttpServer) NewConnectDialToProxy(https_proxy string) func(network, addr string, r *http.Request) (net.Conn, error) {
 	return proxy.NewConnectDialToProxyWithHandler(https_proxy, nil)
 }
 
-func (proxy *ProxyHttpServer) NewConnectDialToProxyWithHandler(https_proxy string, connectReqHandler func(req *http.Request)) func(network, addr string) (net.Conn, error) {
+func (proxy *ProxyHttpServer) NewConnectDialToProxyWithHandler(https_proxy string, connectReqHandler func(req *http.Request)) func(network, addr string, r *http.Request) (net.Conn, error) {
 	u, err := url.Parse(https_proxy)
 	if err != nil {
 		return nil
@@ -326,7 +326,7 @@ func (proxy *ProxyHttpServer) NewConnectDialToProxyWithHandler(https_proxy strin
 		if strings.IndexRune(u.Host, ':') == -1 {
 			u.Host += ":80"
 		}
-		return func(network, addr string) (net.Conn, error) {
+		return func(network, addr string, r *http.Request) (net.Conn, error) {
 			connectReq := &http.Request{
 				Method: "CONNECT",
 				URL:    &url.URL{Opaque: addr},
@@ -366,7 +366,7 @@ func (proxy *ProxyHttpServer) NewConnectDialToProxyWithHandler(https_proxy strin
 		if strings.IndexRune(u.Host, ':') == -1 {
 			u.Host += ":443"
 		}
-		return func(network, addr string) (net.Conn, error) {
+		return func(network, addr string, r *http.Request) (net.Conn, error) {
 			c, err := proxy.dial(network, u.Host)
 			if err != nil {
 				return nil, err
