@@ -13,6 +13,11 @@ type ProxyCtx struct {
 	// Will contain the remote server's response (if available. nil if the request wasn't send yet)
 	Resp         *http.Response
 	RoundTripper RoundTripper
+
+	// Transport for the specific request to be used if RoundTripper is nil and it itself is not nil.
+	// If both RoundTripper and LocalTr are nil then default proxy.Tr will be used.
+	LocalTr *http.Transport
+
 	// will contain the recent error that occurred while trying to send receive or parse traffic
 	Error error
 	// A handle for the user to keep data in the context, from the call of ReqHandler to the
@@ -37,6 +42,11 @@ func (ctx *ProxyCtx) RoundTrip(req *http.Request) (*http.Response, error) {
 	if ctx.RoundTripper != nil {
 		return ctx.RoundTripper.RoundTrip(req, ctx)
 	}
+
+	if ctx.LocalTr != nil {
+		return ctx.LocalTr.RoundTrip(req)
+	}
+
 	return ctx.proxy.Tr.RoundTrip(req)
 }
 
