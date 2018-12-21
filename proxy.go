@@ -160,7 +160,7 @@ func NewProxyHttpServer() *ProxyHttpServer {
 		}),
 		Tr: &http.Transport{TLSClientConfig: tlsClientSkipVerify, Proxy: http.ProxyFromEnvironment},
 	}
-	logrus.SetFormatter(&logrus.JSONFormatter{})
+	proxy.Logger.SetFormatter(&logrus.JSONFormatter{})
 	proxy.ConnectDial = dialerFromEnv(&proxy)
 
 	return &proxy
