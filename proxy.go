@@ -20,7 +20,7 @@ type ProxyHttpServer struct {
 	KeepDestinationHeaders bool
 	// setting Verbose to true will log information on each request sent to the proxy
 	Verbose         bool
-	Logger          *logrus.Logger
+	Logger          Logger
 	NonproxyHandler http.Handler
 	reqHandlers     []ReqHandler
 	respHandlers    []RespHandler
@@ -150,8 +150,11 @@ func (proxy *ProxyHttpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 // NewProxyHttpServer creates and returns a proxy server, logging to stderr by default
 func NewProxyHttpServer() *ProxyHttpServer {
+
+	l := logrus.New()
+	l.SetFormatter(&logrus.JSONFormatter{})
 	proxy := ProxyHttpServer{
-		Logger:        logrus.New(),
+		Logger:        l,
 		reqHandlers:   []ReqHandler{},
 		respHandlers:  []RespHandler{},
 		httpsHandlers: []HttpsHandler{},
@@ -160,7 +163,6 @@ func NewProxyHttpServer() *ProxyHttpServer {
 		}),
 		Tr: &http.Transport{TLSClientConfig: tlsClientSkipVerify, Proxy: http.ProxyFromEnvironment},
 	}
-	proxy.Logger.SetFormatter(&logrus.JSONFormatter{})
 	proxy.ConnectDial = dialerFromEnv(&proxy)
 
 	return &proxy
