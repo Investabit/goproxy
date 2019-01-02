@@ -14,12 +14,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
-type ConnectActionLiteral int
+type ConnectActionLiteral int8
 
 const (
-	ConnectAccept = iota
+	ConnectAccept ConnectActionLiteral = iota
 	ConnectReject
 	ConnectMitm
 	ConnectHijack
@@ -166,6 +167,11 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 			}
 		}
 	case ConnectMitm:
+		start := time.Now()
+		defer func() {
+			ctx.Logf("Connect MITM Took %v", time.Now().Sub(start))
+		}()
+
 		proxyClient.Write(replyOk)
 		ctx.Logf("Assuming CONNECT is TLS, mitm proxying it")
 		// this goes in a separate goroutine, so that the net/http server won't think we're
@@ -203,7 +209,6 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 				req.RemoteAddr = r.RemoteAddr // since we're converting the request, need to carry over the original connecting IP as well
 				ctx.Logf("req %v", r.Host)
 
-				// TODO test this since it looks like it was a bug to begin with if we were to add https + hostname + full url
 				if !IsHttps(req.URL) {
 					req.URL.Scheme = "https"
 					req.URL.Host = r.Host
@@ -216,7 +221,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 				req, resp := proxy.filterRequest(req, ctx)
 				if resp == nil {
 					if err != nil {
-						ctx.Warnf("Illegal URL %s", "https://"+r.Host+req.URL.Path)
+						ctx.Warnf("Illegal URL %s", req.URL.String())
 						return
 					}
 					removeProxyHeaders(ctx, req)
