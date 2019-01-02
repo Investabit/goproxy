@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,8 +32,13 @@ var (
 	MitmConnect     = &ConnectAction{Action: ConnectMitm, TLSConfig: TLSConfigFromCA(&GoproxyCa)}
 	HTTPMitmConnect = &ConnectAction{Action: ConnectHTTPMitm, TLSConfig: TLSConfigFromCA(&GoproxyCa)}
 	RejectConnect   = &ConnectAction{Action: ConnectReject, TLSConfig: TLSConfigFromCA(&GoproxyCa)}
-	httpsRegexp     = regexp.MustCompile(`^https:\/\/`)
 )
+
+var replyOk = []byte("HTTP/1.0 200 OK\r\n\r\n")
+
+func IsHttps(uri *url.URL) bool {
+	return uri.Scheme == "https"
+}
 
 type ConnectAction struct {
 	Action    ConnectActionLiteral
@@ -91,7 +95,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 	}
 	switch todo.Action {
 	case ConnectAccept:
-		if !hasPort.MatchString(host) {
+		if r.URL.Port() == "" {
 			host += ":80"
 		}
 		targetSiteCon, err := proxy.connectDial("tcp", host, r)
@@ -100,7 +104,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 			return
 		}
 		ctx.Logf("Accepting CONNECT to %s", host)
-		proxyClient.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
+		proxyClient.Write(replyOk)
 
 		targetTCP, targetOK := targetSiteCon.(*net.TCPConn)
 		proxyClientTCP, clientOK := proxyClient.(*net.TCPConn)
@@ -122,10 +126,10 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 
 	case ConnectHijack:
 		ctx.Logf("Hijacking CONNECT to %s", host)
-		proxyClient.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
+		proxyClient.Write(replyOk)
 		todo.Hijack(r, proxyClient, ctx)
 	case ConnectHTTPMitm:
-		proxyClient.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
+		proxyClient.Write(replyOk)
 		ctx.Logf("Assuming CONNECT is plain HTTP tunneling, mitm proxying it")
 		targetSiteCon, err := proxy.connectDial("tcp", host, r)
 		if err != nil {
@@ -162,7 +166,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 			}
 		}
 	case ConnectMitm:
-		proxyClient.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
+		proxyClient.Write(replyOk)
 		ctx.Logf("Assuming CONNECT is TLS, mitm proxying it")
 		// this goes in a separate goroutine, so that the net/http server won't think we're
 		// still handling the request even after hijacking the connection. Those HTTP CONNECT
@@ -199,8 +203,10 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 				req.RemoteAddr = r.RemoteAddr // since we're converting the request, need to carry over the original connecting IP as well
 				ctx.Logf("req %v", r.Host)
 
-				if !httpsRegexp.MatchString(req.URL.String()) {
-					req.URL, err = url.Parse("https://" + r.Host + req.URL.String())
+				// TODO test this since it looks like it was a bug to begin with if we were to add https + hostname + full url
+				if !IsHttps(req.URL) {
+					req.URL.Scheme = "https"
+					req.URL.Host = r.Host
 				}
 
 				// Bug fix which goproxy fails to provide request

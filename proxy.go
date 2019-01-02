@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"regexp"
 	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
@@ -30,8 +29,6 @@ type ProxyHttpServer struct {
 	// if nil Tr.Dial will be used
 	ConnectDial func(network string, addr string, r *http.Request) (net.Conn, error)
 }
-
-var hasPort = regexp.MustCompile(`:\d+$`)
 
 func copyHeaders(dst, src http.Header, keepDestHeaders bool) {
 	if !keepDestHeaders {

@@ -702,7 +702,10 @@ func readResponse(buf *bufio.Reader) string {
 }
 
 func writeConnect(w io.Writer) {
-	req, err := http.NewRequest("CONNECT", srv.URL[len("http://"):], nil)
+	u, err := url.Parse(srv.URL)
+	panicOnErr(err, "url parse")
+	u.Scheme = ""
+	req, err := http.NewRequest("CONNECT", u.String(), nil)
 	panicOnErr(err, "NewRequest")
 	req.Write(w)
 	panicOnErr(err, "req(CONNECT).Write")
