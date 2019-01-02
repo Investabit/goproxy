@@ -200,7 +200,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 			ctx.Logf("Connect MITM tls startup Took %v", time.Now().Sub(tlsStartup))
 
 			for !isEof(clientTlsReader) {
-				filteringTime := time.Now()
+				readRequestTime := time.Now()
 				req, err := http.ReadRequest(clientTlsReader)
 				if err != nil && err != io.EOF {
 					return
@@ -222,7 +222,9 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 				// Bug fix which goproxy fails to provide request
 				// information URL in the context when does HTTPS MITM
 				ctx.Req = req
+				ctx.Logf("Connect MITM read request %v", time.Now().Sub(readRequestTime))
 
+				filteringTime := time.Now()
 				req, resp := proxy.filterRequest(req, ctx)
 				if resp == nil {
 					if err != nil {
