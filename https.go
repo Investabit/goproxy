@@ -185,6 +185,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 			}
 		}
 		go func() {
+			tlsStartup := time.Now()
 			defer func() {
 				ctx.Logf("Connect MITM Took %v", time.Now().Sub(start))
 			}()
@@ -196,12 +197,16 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 			}
 			defer rawClientTls.Close()
 			clientTlsReader := bufio.NewReader(rawClientTls)
+			ctx.Logf("Connect MITM tls startup Took %v", time.Now().Sub(tlsStartup))
+
 			for !isEof(clientTlsReader) {
+				filteringTime := time.Now()
 				req, err := http.ReadRequest(clientTlsReader)
-				var ctx = &ProxyCtx{Req: req, Session: atomic.AddInt64(&proxy.sess, 1), proxy: proxy, UserData: ctx.UserData}
 				if err != nil && err != io.EOF {
 					return
 				}
+
+				var ctx = &ProxyCtx{Req: req, Session: atomic.AddInt64(&proxy.sess, 1), proxy: proxy, UserData: ctx.UserData}
 				if err != nil {
 					ctx.Warnf("Cannot read TLS request from mitm'd client %v %v", r.Host, err)
 					return
@@ -233,6 +238,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 					ctx.Logf("resp %v", resp.Status)
 				}
 				resp = proxy.filterResponse(resp, ctx)
+				ctx.Logf("Connect MITM request/response filtering %v", time.Now().Sub(filteringTime))
 				defer resp.Body.Close()
 
 				text := resp.Status
