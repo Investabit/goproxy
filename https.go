@@ -168,9 +168,6 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 		}
 	case ConnectMitm:
 		start := time.Now()
-		defer func() {
-			ctx.Logf("Connect MITM Took %v", time.Now().Sub(start))
-		}()
 
 		proxyClient.Write(replyOk)
 		ctx.Logf("Assuming CONNECT is TLS, mitm proxying it")
@@ -188,6 +185,9 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 			}
 		}
 		go func() {
+			defer func() {
+				ctx.Logf("Connect MITM Took %v", time.Now().Sub(start))
+			}()
 			//TODO: cache connections to the remote website
 			rawClientTls := tls.Server(proxyClient, tlsConfig)
 			if err := rawClientTls.Handshake(); err != nil {
