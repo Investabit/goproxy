@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 type ConnectActionLiteral int8
@@ -167,8 +166,6 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 			}
 		}
 	case ConnectMitm:
-		start := time.Now()
-
 		proxyClient.Write(replyOk)
 		ctx.Logf("Assuming CONNECT is TLS, mitm proxying it")
 		// this goes in a separate goroutine, so that the net/http server won't think we're
@@ -185,10 +182,6 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 			}
 		}
 		go func() {
-			tlsStartup := time.Now()
-			defer func() {
-				ctx.Logf("Connect MITM Took %v", time.Now().Sub(start))
-			}()
 			//TODO: cache connections to the remote website
 			rawClientTls := tls.Server(proxyClient, tlsConfig)
 			if err := rawClientTls.Handshake(); err != nil {
@@ -197,10 +190,8 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 			}
 			defer rawClientTls.Close()
 			clientTlsReader := bufio.NewReader(rawClientTls)
-			ctx.Logf("Connect MITM tls startup Took %v", time.Now().Sub(tlsStartup))
 
 			for !isEof(clientTlsReader) {
-				readRequestTime := time.Now()
 				req, err := http.ReadRequest(clientTlsReader)
 				if err != nil && err != io.EOF {
 					return
@@ -222,9 +213,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 				// Bug fix which goproxy fails to provide request
 				// information URL in the context when does HTTPS MITM
 				ctx.Req = req
-				ctx.Logf("Connect MITM read request %v", time.Now().Sub(readRequestTime))
 
-				filteringTime := time.Now()
 				req, resp := proxy.filterRequest(req, ctx)
 				if resp == nil {
 					if err != nil {
@@ -240,7 +229,6 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 					ctx.Logf("resp %v", resp.Status)
 				}
 				resp = proxy.filterResponse(resp, ctx)
-				ctx.Logf("Connect MITM request/response filtering %v", time.Now().Sub(filteringTime))
 				defer resp.Body.Close()
 
 				text := resp.Status
