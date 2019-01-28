@@ -68,11 +68,11 @@ func (proxy *ProxyHttpServer) connectDial(network, addr string, r *http.Request)
 	return proxy.ConnectDial(network, addr, r)
 }
 
-func handleCloseResponse(resp *http.Response) {
-	if resp != nil {
-		defer resp.Body.Close()
-	}
-}
+// func handleCloseResponse(resp *http.Response) {
+// 	if resp != nil {
+// 		defer resp.Body.Close()
+// 	}
+// }
 
 func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request) {
 	ctx := &ProxyCtx{Req: r, Session: atomic.AddInt64(&proxy.sess, 1), proxy: proxy}
@@ -115,18 +115,16 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 		targetTCP, targetOK := targetSiteCon.(*net.TCPConn)
 		proxyClientTCP, clientOK := proxyClient.(*net.TCPConn)
 		if targetOK && clientOK {
-			go copyAndClose(ctx, targetTCP, proxyClientTCP)
-			go copyAndClose(ctx, proxyClientTCP, targetTCP)
-			// go func() {
-			// 	var wg sync.WaitGroup
-			// 	wg.Add(2)
-			// 	go copyAndClose(ctx, targetTCP, proxyClientTCP, &wg)
-			// 	go copyAndClose(ctx, proxyClientTCP, targetTCP, &wg)
-			// 	wg.Wait()
-			// 	proxyClientTCP.Close()
-			// 	targetTCP.Close()
+			go func() {
+				var wg sync.WaitGroup
+				wg.Add(2)
+				go copyAndClose(ctx, targetTCP, proxyClientTCP, &wg)
+				go copyAndClose(ctx, proxyClientTCP, targetTCP, &wg)
+				wg.Wait()
+				proxyClientTCP.Close()
+				targetTCP.Close()
 
-			// }()
+			}()
 		} else {
 			go func() {
 				var wg sync.WaitGroup
@@ -173,7 +171,10 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 					httpError(proxyClient, ctx, err)
 					return
 				}
-				handleCloseResponse(resp)
+				// handleCloseResponse(resp)
+				if resp != nil {
+					defer resp.Body.Close()
+				}
 			}
 			resp = proxy.filterResponse(resp, ctx)
 			if err := resp.Write(proxyClient); err != nil {
@@ -246,7 +247,42 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 				}
 				resp = proxy.filterResponse(resp, ctx)
 
-				if ok := handleMITMResponse(resp, rawClientTls, ctx); !ok {
+				// if ok := handleMITMResponse(resp, rawClientTls, ctx); !ok {
+				// 	return
+				// }
+
+				defer resp.Body.Close()
+
+				text := resp.Status
+				statusCode := strconv.Itoa(resp.StatusCode) + " "
+				if strings.HasPrefix(text, statusCode) {
+					text = text[len(statusCode):]
+				}
+
+				// always use 1.1 to support chunked encoding
+				if _, err := io.WriteString(rawClientTls, "HTTP/1.1"+" "+statusCode+text+"\r\n"); err != nil {
+					ctx.Warnf("Cannot write TLS response HTTP status from mitm'd client: %v", err)
+					return
+				}
+
+				// Since we don't know the length of resp, return chunked encoded response
+				// TODO: use a more reasonable scheme
+				resp.Header.Del("Content-Length")
+				resp.Header.Set("Transfer-Encoding", "chunked")
+				// Force connection close otherwise chrome will keep CONNECT tunnel open forever
+				resp.Header.Set("Connection", "close")
+
+				if _, err = io.WriteString(rawClientTls, "\r\n"); err != nil {
+					ctx.Warnf("Cannot write TLS response header end from mitm'd client: %v", err)
+					return
+				}
+				chunked := newChunkedWriter(rawClientTls)
+				if _, err := io.Copy(chunked, resp.Body); err != nil {
+					ctx.Warnf("Cannot write TLS response body from mitm'd client: %v", err)
+					return
+				}
+				if err := chunked.Close(); err != nil {
+					ctx.Warnf("Cannot write TLS chunked EOF from mitm'd client: %v", err)
 					return
 				}
 
@@ -270,44 +306,44 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// This method will make sure the body is closed each iteration of the loop rather than leaving ones dangling open...
-func handleMITMResponse(resp *http.Response, rawClientTls *tls.Conn, ctx *ProxyCtx) (ok bool) {
-	defer resp.Body.Close()
+// // This method will make sure the body is closed each iteration of the loop rather than leaving ones dangling open...
+// func handleMITMResponse(resp *http.Response, rawClientTls *tls.Conn, ctx *ProxyCtx) (ok bool) {
+// 	defer resp.Body.Close()
 
-	text := resp.Status
-	statusCode := strconv.Itoa(resp.StatusCode) + " "
-	if strings.HasPrefix(text, statusCode) {
-		text = text[len(statusCode):]
-	}
+// 	text := resp.Status
+// 	statusCode := strconv.Itoa(resp.StatusCode) + " "
+// 	if strings.HasPrefix(text, statusCode) {
+// 		text = text[len(statusCode):]
+// 	}
 
-	// always use 1.1 to support chunked encoding
-	if _, err := io.WriteString(rawClientTls, "HTTP/1.1"+" "+statusCode+text+"\r\n"); err != nil {
-		ctx.Warnf("Cannot write TLS response HTTP status from mitm'd client: %v", err)
-		return
-	}
+// 	// always use 1.1 to support chunked encoding
+// 	if _, err := io.WriteString(rawClientTls, "HTTP/1.1"+" "+statusCode+text+"\r\n"); err != nil {
+// 		ctx.Warnf("Cannot write TLS response HTTP status from mitm'd client: %v", err)
+// 		return
+// 	}
 
-	// Since we don't know the length of resp, return chunked encoded response
-	// TODO: use a more reasonable scheme
-	resp.Header.Del("Content-Length")
-	resp.Header.Set("Transfer-Encoding", "chunked")
-	// Force connection close otherwise chrome will keep CONNECT tunnel open forever
-	resp.Header.Set("Connection", "close")
+// 	// Since we don't know the length of resp, return chunked encoded response
+// 	// TODO: use a more reasonable scheme
+// 	resp.Header.Del("Content-Length")
+// 	resp.Header.Set("Transfer-Encoding", "chunked")
+// 	// Force connection close otherwise chrome will keep CONNECT tunnel open forever
+// 	resp.Header.Set("Connection", "close")
 
-	if _, err := io.WriteString(rawClientTls, "\r\n"); err != nil {
-		ctx.Warnf("Cannot write TLS response header end from mitm'd client: %v", err)
-		return
-	}
-	chunked := newChunkedWriter(rawClientTls)
-	if _, err := io.Copy(chunked, resp.Body); err != nil {
-		ctx.Warnf("Cannot write TLS response body from mitm'd client: %v", err)
-		return
-	}
-	if err := chunked.Close(); err != nil {
-		ctx.Warnf("Cannot write TLS chunked EOF from mitm'd client: %v", err)
-		return
-	}
-	return true
-}
+// 	if _, err = io.WriteString(rawClientTls, "\r\n"); err != nil {
+// 		ctx.Warnf("Cannot write TLS response header end from mitm'd client: %v", err)
+// 		return
+// 	}
+// 	chunked := newChunkedWriter(rawClientTls)
+// 	if _, err := io.Copy(chunked, resp.Body); err != nil {
+// 		ctx.Warnf("Cannot write TLS response body from mitm'd client: %v", err)
+// 		return
+// 	}
+// 	if err := chunked.Close(); err != nil {
+// 		ctx.Warnf("Cannot write TLS chunked EOF from mitm'd client: %v", err)
+// 		return
+// 	}
+// 	return true
+// }
 
 func httpError(w io.WriteCloser, ctx *ProxyCtx, err error) {
 	if _, err := io.WriteString(w, "HTTP/1.1 502 Bad Gateway\r\n\r\n"); err != nil {
@@ -325,14 +361,14 @@ func copyOrWarn(ctx *ProxyCtx, dst io.Writer, src io.Reader, wg *sync.WaitGroup)
 	wg.Done()
 }
 
-func copyAndClose(ctx *ProxyCtx, dst, src *net.TCPConn) {
+func copyAndClose(ctx *ProxyCtx, dst, src *net.TCPConn, wg *sync.WaitGroup) {
 	if _, err := io.Copy(dst, src); err != nil {
 		ctx.Warnf("Error copying to client: %s", err)
 	}
 
 	dst.CloseWrite()
 	src.CloseRead()
-	// wg.Done()
+	wg.Done()
 }
 
 func dialerFromEnv(proxy *ProxyHttpServer) func(network, addr string, r *http.Request) (net.Conn, error) {
