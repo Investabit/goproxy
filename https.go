@@ -291,7 +291,7 @@ func handleMITMResponse(resp *http.Response, rawClientTls *tls.Conn, ctx *ProxyC
 	// Force connection close otherwise chrome will keep CONNECT tunnel open forever
 	resp.Header.Set("Connection", "close")
 
-	if _, err = io.WriteString(rawClientTls, "\r\n"); err != nil {
+	if _, err := io.WriteString(rawClientTls, "\r\n"); err != nil {
 		ctx.Warnf("Cannot write TLS response header end from mitm'd client: %v", err)
 		return
 	}
