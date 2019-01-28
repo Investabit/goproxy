@@ -115,16 +115,18 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 		targetTCP, targetOK := targetSiteCon.(*net.TCPConn)
 		proxyClientTCP, clientOK := proxyClient.(*net.TCPConn)
 		if targetOK && clientOK {
-			go func() {
-				var wg sync.WaitGroup
-				wg.Add(2)
-				go copyAndClose(ctx, targetTCP, proxyClientTCP, &wg)
-				go copyAndClose(ctx, proxyClientTCP, targetTCP, &wg)
-				wg.Wait()
-				proxyClientTCP.Close()
-				targetTCP.Close()
+			go copyAndClose(ctx, targetTCP, proxyClientTCP)
+			go copyAndClose(ctx, proxyClientTCP, targetTCP)
+			// go func() {
+			// 	var wg sync.WaitGroup
+			// 	wg.Add(2)
+			// 	go copyAndClose(ctx, targetTCP, proxyClientTCP, &wg)
+			// 	go copyAndClose(ctx, proxyClientTCP, targetTCP, &wg)
+			// 	wg.Wait()
+			// 	proxyClientTCP.Close()
+			// 	targetTCP.Close()
 
-			}()
+			// }()
 		} else {
 			go func() {
 				var wg sync.WaitGroup
@@ -323,14 +325,14 @@ func copyOrWarn(ctx *ProxyCtx, dst io.Writer, src io.Reader, wg *sync.WaitGroup)
 	wg.Done()
 }
 
-func copyAndClose(ctx *ProxyCtx, dst, src *net.TCPConn, wg *sync.WaitGroup) {
+func copyAndClose(ctx *ProxyCtx, dst, src *net.TCPConn) {
 	if _, err := io.Copy(dst, src); err != nil {
 		ctx.Warnf("Error copying to client: %s", err)
 	}
 
 	dst.CloseWrite()
 	src.CloseRead()
-	wg.Done()
+	// wg.Done()
 }
 
 func dialerFromEnv(proxy *ProxyHttpServer) func(network, addr string, r *http.Request) (net.Conn, error) {
