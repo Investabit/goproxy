@@ -171,10 +171,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 					httpError(proxyClient, ctx, err)
 					return
 				}
-				// handleCloseResponse(resp)
-				if resp != nil {
-					defer resp.Body.Close()
-				}
+				defer resp.Body.Close() // TODO look into changing this.
 			}
 			resp = proxy.filterResponse(resp, ctx)
 			if err := resp.Write(proxyClient); err != nil {
@@ -272,6 +269,11 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 				// Force connection close otherwise chrome will keep CONNECT tunnel open forever
 				resp.Header.Set("Connection", "close")
 
+				if err := resp.Header.Write(rawClientTls); err != nil {
+					ctx.Warnf("Cannot write TLS response header from mitm'd client: %v", err)
+					return
+				}
+
 				if _, err = io.WriteString(rawClientTls, "\r\n"); err != nil {
 					ctx.Warnf("Cannot write TLS response header end from mitm'd client: %v", err)
 					return
@@ -328,6 +330,11 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 // 	resp.Header.Set("Transfer-Encoding", "chunked")
 // 	// Force connection close otherwise chrome will keep CONNECT tunnel open forever
 // 	resp.Header.Set("Connection", "close")
+
+// 	if err := resp.Header.Write(rawClientTls); err != nil {
+// 		ctx.Warnf("Cannot write TLS response header from mitm'd client: %v", err)
+// 		return
+// 	}
 
 // 	if _, err = io.WriteString(rawClientTls, "\r\n"); err != nil {
 // 		ctx.Warnf("Cannot write TLS response header end from mitm'd client: %v", err)
